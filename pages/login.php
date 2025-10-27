@@ -1,94 +1,91 @@
 <?php
-session_start();
-require_once '../data/database/dbconfig.php';  // database connection
-include '../includes/head.php';
+include '../data/dbconfig.php';
+
+if($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $email = $_POST['email'];
+    $password = $_POST['password'];
+    
+    $stmt = $pdo->prepare("
+        SELECT u.*, 
+               p.PAT_FIRST_NAME, p.PAT_LAST_NAME,
+               s.STAFF_FIRST_NAME, s.STAFF_LAST_NAME,
+               d.DOC_FIRST_NAME, d.DOC_LAST_NAME
+        FROM USER u 
+        LEFT JOIN PATIENT p ON u.PAT_ID = p.PAT_ID
+        LEFT JOIN STAFF s ON u.STAFF_ID = s.STAFF_ID
+        LEFT JOIN DOCTOR d ON u.DOC_ID = d.DOC_ID
+        WHERE u.USER_NAME = ? AND u.USER_IS_ACTIVE = 1
+    ");
+    $stmt->execute([$email]);
+    $user = $stmt->fetch();
+    
+    if($user && password_verify($password, $user['USER_PASSWORD'])) {
+        $_SESSION['user_id'] = $user['USER_ID'];
+        $_SESSION['user_name'] = $user['USER_NAME'];
+        $_SESSION['is_superadmin'] = $user['USER_IS_SUPERADMIN'];
+        
+        // Determine user role
+        if($user['USER_IS_SUPERADMIN']) {
+            $_SESSION['user_role'] = 'superadmin';
+            header("Location: superadmin_dashboard.php");
+        } elseif($user['PAT_ID']) {
+            $_SESSION['user_role'] = 'patient';
+            $_SESSION['user_display_name'] = $user['PAT_FIRST_NAME'] . ' ' . $user['PAT_LAST_NAME'];
+            header("Location: patient_appointments.php");
+        } elseif($user['STAFF_ID']) {
+            $_SESSION['user_role'] = 'staff';
+            $_SESSION['user_display_name'] = $user['STAFF_FIRST_NAME'] . ' ' . $user['STAFF_LAST_NAME'];
+            header("Location: staff_dashboard.php");
+        } elseif($user['DOC_ID']) {
+            $_SESSION['user_role'] = 'doctor';
+            $_SESSION['user_display_name'] = 'Dr. ' . $user['DOC_FIRST_NAME'] . ' ' . $user['DOC_LAST_NAME'];
+            header("Location: doctor_today.php");
+        }
+        exit();
+    } else {
+        $error = "Invalid email or password!";
+    }
+}
 ?>
 
-<div class="container py-5">
-    <div class="text-center mb-5">
-        <h1 class="fw-bold text-primary">Clinic Booking System</h1>
-        <p class="text-muted">Sign in to manage your appointments, records, and more.</p>
-    </div>
+<?php include '../includes/head.php'; ?>
+<?php include '../includes/navbar.php'; ?>
 
+<div class="container mt-5">
     <div class="row justify-content-center">
-        <div class="col-md-5">
-            <div class="card shadow border-0">
-                <div class="card-body p-4">
-                    <h4 class="text-center mb-4 fw-semibold">Login</h4>
-
-                    <?php
-                    // Handle login submission
-                    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-                        $username = trim($_POST['username']);
-                        $password = trim($_POST['password']);
-
-                        if (!empty($username) && !empty($password)) {
-                            $stmt = $pdo->prepare("SELECT * FROM USER WHERE USER_NAME = ?");
-                            $stmt->execute([$username]);
-                            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                            if ($user && password_verify($password, $user['USER_PASSWORD'])) {
-                                // Store session info
-                                $_SESSION['user_id'] = $user['USER_ID'];
-                                $_SESSION['username'] = $user['USER_NAME'];
-
-                                // Redirect based on role
-                                if ($user['USER_IS_SUPERADMIN']) {
-                                    header("Location: superadmin_dashboard.php");
-                                    exit;
-                                } elseif (!is_null($user['STAFF_ID'])) {
-                                    header("Location: staff_dashboard.php");
-                                    exit;
-                                } elseif (!is_null($user['DOC_ID'])) {
-                                    header("Location: doctor_today.php");
-                                    exit;
-                                } elseif (!is_null($user['PAT_ID'])) {
-                                    header("Location: patient_appointments.php");
-                                    exit;
-                                } else {
-                                    echo '<div class="alert alert-warning">User role not found.</div>';
-                                }
-                            } else {
-                                echo '<div class="alert alert-danger">Invalid username or password.</div>';
-                            }
-                        } else {
-                            echo '<div class="alert alert-warning">Please fill in both fields.</div>';
-                        }
-                    }
-                    ?>
-
-                    <form action="" method="POST">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="fas fa-sign-in-alt"></i> Login to Your Account</h4>
+                </div>
+                <div class="card-body">
+                    <?php if(isset($error)): ?>
+                        <div class="alert alert-danger"><?= $error ?></div>
+                    <?php endif; ?>
+                    
+                    <form method="POST">
                         <div class="mb-3">
-                            <label for="username" class="form-label">Username</label>
-                            <input type="text" name="username" id="username" class="form-control" required>
+                            <label for="email" class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
                         </div>
-
                         <div class="mb-3">
                             <label for="password" class="form-label">Password</label>
-                            <input type="password" name="password" id="password" class="form-control" required>
+                            <input type="password" class="form-control" id="password" name="password" required>
                         </div>
-
-                        <button type="submit" class="btn btn-primary w-100">Login</button>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </button>
                     </form>
-
-                    <hr class="my-4">
-
-                    <div class="text-center">
-                        <p class="text-muted small mb-2">Don’t have an account?</p>
-                        <div class="d-grid gap-2">
-                            <a href="../register/register_patient.php" class="btn btn-outline-success btn-sm">Register as Patient</a>
-                            <a href="../register/register_staff.php" class="btn btn-outline-secondary btn-sm">Register as Staff</a>
-                            <a href="../register/register_doctor.php" class="btn btn-outline-info btn-sm">Register as Doctor</a>
-                        </div>
+                    
+                    <div class="mt-3 text-center">
+                        <p>Don't have an account? 
+                            <a href="../register/register_patient.php">Register as Patient</a>
+                        </p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <footer class="text-center mt-5 text-muted">
-        <small>© <?php echo date('Y'); ?> Medical Clinic Booking System | All Rights Reserved</small>
-    </footer>
 </div>
 
 <?php include '../includes/tail.php'; ?>
