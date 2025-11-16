@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_role'])) {
         $delete_doctor = $pdo->prepare("DELETE FROM DOCTOR WHERE DOC_ID = ?");
         $delete_doctor->execute([$user_id]);
         
+        // For patient deletion, we need to handle appointments first
         $delete_patient = $pdo->prepare("DELETE FROM PATIENT WHERE PAT_ID = ?");
         $delete_patient->execute([$user_id]);
         
@@ -116,6 +117,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_role'])) {
     try {
         $pdo->beginTransaction();
         
+        // First, check if the user has a patient role and has appointments
+        $check_patient = $pdo->prepare("SELECT PAT_ID FROM USER WHERE USER_ID = ? AND PAT_ID IS NOT NULL");
+        $check_patient->execute([$user_id]);
+        $has_patient_role = $check_patient->fetch();
+        
+        if ($has_patient_role) {
+            // Check if patient has appointments
+            $check_appointments = $pdo->prepare("SELECT COUNT(*) as appointment_count FROM appointment WHERE PAT_ID = ?");
+            $check_appointments->execute([$user_id]);
+            $appointment_count = $check_appointments->fetch(PDO::FETCH_ASSOC)['appointment_count'];
+            
+            if ($appointment_count > 0) {
+                throw new Exception("Cannot remove patient role: This patient has {$appointment_count} appointment(s) in the system. Please delete or reassign the appointments first.");
+            }
+        }
+        
         // First, clear all role references in USER table
         $clear_roles = $pdo->prepare("UPDATE USER SET PAT_ID = NULL, STAFF_ID = NULL, DOC_ID = NULL, USER_IS_SUPERADMIN = FALSE WHERE USER_ID = ?");
         $clear_roles->execute([$user_id]);
@@ -127,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_role'])) {
         $delete_doctor = $pdo->prepare("DELETE FROM DOCTOR WHERE DOC_ID = ?");
         $delete_doctor->execute([$user_id]);
         
+        // Only delete patient if no appointments exist (we already checked above)
         $delete_patient = $pdo->prepare("DELETE FROM PATIENT WHERE PAT_ID = ?");
         $delete_patient->execute([$user_id]);
         
@@ -139,7 +157,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_role'])) {
         
     } catch (PDOException $e) {
         $pdo->rollBack();
-        $error_message = "Error removing role: " . $e->getMessage();
+        $error_message = "Database error removing role: " . $e->getMessage();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $error_message = $e->getMessage();
     }
 }
 
@@ -241,6 +262,14 @@ $users = $pdo->query("
                                                 if ($user['user_role'] === 'Patient' && $user['PAT_FIRST_NAME']) {
                                                     echo htmlspecialchars($user['PAT_FIRST_NAME'] . ' ' . $user['PAT_LAST_NAME']);
                                                     echo '<br><small class="text-muted">' . htmlspecialchars($user['PAT_EMAIL']) . '</small>';
+                                                    
+                                                    // Show appointment count for patients
+                                                    $appt_count_stmt = $pdo->prepare("SELECT COUNT(*) as appt_count FROM appointment WHERE PAT_ID = ?");
+                                                    $appt_count_stmt->execute([$user['USER_ID']]);
+                                                    $appt_count = $appt_count_stmt->fetch(PDO::FETCH_ASSOC)['appt_count'];
+                                                    if ($appt_count > 0) {
+                                                        echo '<br><small class="text-warning"><i class="fas fa-calendar-check me-1"></i>' . $appt_count . ' appointment(s)</small>';
+                                                    }
                                                 } elseif ($user['user_role'] === 'Staff' && $user['STAFF_FIRST_NAME']) {
                                                     echo htmlspecialchars($user['STAFF_FIRST_NAME'] . ' ' . $user['STAFF_LAST_NAME']);
                                                     if ($user['STAFF_POSITION']) {
@@ -387,7 +416,13 @@ $users = $pdo->query("
                             - <strong>Staff</strong>: Creates record in STAFF table with default details<br>
                             - <strong>Doctor</strong>: Creates record in DOCTOR table with default details<br>
                             - <strong>Remove Roles</strong>: User becomes basic user and all role-specific data is deleted<br>
-                            - <strong>Role Switching</strong>: Previous role records are automatically cleaned up
+                            - <strong>Important</strong>: Cannot remove patient role if the patient has existing appointments
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <strong><i class="fas fa-exclamation-triangle me-2"></i>Important Note:</strong><br>
+                            If you encounter errors when removing patient roles, it means the patient has existing appointments in the system. 
+                            You must first delete or reassign those appointments before removing the patient role.
                         </div>
                     </div>
                 </div>
@@ -397,4 +432,4 @@ $users = $pdo->query("
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
-</html> 
+</html>
