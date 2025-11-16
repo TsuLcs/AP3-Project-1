@@ -12,266 +12,189 @@ if (!isset($_SESSION['user_is_superadmin']) && !isset($_SESSION['staff_id'])) {
 $action = $_GET['action'] ?? 'list';
 $message = '';
 
-// Handle form submissions
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    if ($action == 'add') {
-        $stmt = $pdo->prepare("INSERT INTO STAFF (STAFF_FIRST_NAME, STAFF_LAST_NAME, STAFF_EMAIL, STAFF_POSITION) VALUES (?, ?, ?, ?)");
-        try {
-            $stmt->execute([
-                $_POST['first_name'],
-                $_POST['last_name'],
-                $_POST['email'],
-                $_POST['position']
-            ]);
-            $message = '<div class="alert alert-success">Staff added successfully!</div>';
-            $action = 'list';
-        } catch (PDOException $e) {
-            $message = '<div class="alert alert-danger">Error adding staff: ' . $e->getMessage() . '</div>';
-        }
-    } elseif ($action == 'edit' && isset($_POST['id'])) {
+// Handle staff details update
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_staff'])) {
+    $staff_id = $_POST['staff_id'];
+    $first_name = $_POST['first_name'];
+    $last_name = $_POST['last_name'];
+    $email = $_POST['email'];
+    $position = $_POST['position'];
+    
+    try {
         $stmt = $pdo->prepare("UPDATE STAFF SET STAFF_FIRST_NAME = ?, STAFF_LAST_NAME = ?, STAFF_EMAIL = ?, STAFF_POSITION = ? WHERE STAFF_ID = ?");
-        try {
-            $stmt->execute([
-                $_POST['first_name'],
-                $_POST['last_name'],
-                $_POST['email'],
-                $_POST['position'],
-                $_POST['id']
-            ]);
-            $message = '<div class="alert alert-success">Staff updated successfully!</div>';
-            $action = 'list';
-        } catch (PDOException $e) {
-            $message = '<div class="alert alert-danger">Error updating staff: ' . $e->getMessage() . '</div>';
-        }
+        $stmt->execute([$first_name, $last_name, $email, $position, $staff_id]);
+        $success_message = "Staff details updated successfully!";
+        
+        // Refresh the page to show updated data
+        header("Location: staff_manage.php");
+        exit();
+    } catch (PDOException $e) {
+        $error_message = "Error updating staff: " . $e->getMessage();
     }
 }
 
-// Handle delete action
-if (isset($_GET['delete']) && isset($_SESSION['user_is_superadmin'])) {
-    $stmt = $pdo->prepare("DELETE FROM STAFF WHERE STAFF_ID = ?");
-    try {
-        $stmt->execute([$_GET['delete']]);
-        $message = '<div class="alert alert-success">Staff deleted successfully!</div>';
-    } catch (PDOException $e) {
-        $message = '<div class="alert alert-danger">Error deleting staff: ' . $e->getMessage() . '</div>';
-    }
-}
+// Get all staff members
+$staff_members = $pdo->query("
+    SELECT s.*, u.USER_NAME 
+    FROM STAFF s 
+    JOIN USER u ON s.STAFF_ID = u.USER_ID 
+    ORDER BY s.STAFF_FIRST_NAME, s.STAFF_LAST_NAME
+")->fetchAll();
 ?>
 
-<div class="container-fluid">
-    <div class="row">
-        <?php include '../includes/sidebar.php'; ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $page_title; ?> - MediCare Clinic</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="../assets/css/style.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    
+    <div class="container-fluid">
+        <div class="row">
+            <?php include '../includes/sidebar.php'; ?>
+            
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">
+                        <i class="fas fa-users-cog me-2"></i>Staff Management
+                    </h1>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        To assign staff roles, use <a href="user_manage.php" class="alert-link">User Management</a>
+                    </div>
+                </div>
 
-        <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-            <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                <h1 class="h2">Staff Management</h1>
-                <?php if ($action == 'list' && (isset($_SESSION['user_is_superadmin']) || isset($_SESSION['staff_id']))): ?>
-                    <a href="?action=add" class="btn btn-primary">Add New Staff</a>
+                <?php if (isset($success_message)): ?>
+                    <div class="alert alert-success"><?php echo $success_message; ?></div>
                 <?php endif; ?>
-            </div>
+                
+                <?php if (isset($error_message)): ?>
+                    <div class="alert alert-danger"><?php echo $error_message; ?></div>
+                <?php endif; ?>
 
-            <?php echo $message; ?>
-
-            <?php if ($action == 'list'): ?>
-                <!-- Staff List -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">All Staff Members</h5>
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h6 class="m-0 font-weight-bold">
+                            <i class="fas fa-users me-2"></i>Staff Members
+                        </h6>
                     </div>
                     <div class="card-body">
-                        <?php
-                        $search = $_GET['search'] ?? '';
-                        $query = "SELECT * FROM STAFF WHERE 1=1";
-                        $params = [];
-
-                        if (!empty($search)) {
-                            $query .= " AND (STAFF_FIRST_NAME LIKE ? OR STAFF_LAST_NAME LIKE ? OR STAFF_EMAIL LIKE ?)";
-                            $search_term = "%$search%";
-                            $params = [$search_term, $search_term, $search_term];
-                        }
-
-                        $query .= " ORDER BY STAFF_FIRST_NAME, STAFF_LAST_NAME";
-                        $stmt = $pdo->prepare($query);
-                        $stmt->execute($params);
-                        $staff = $stmt->fetchAll();
-                        ?>
-
-                        <!-- Search Form -->
-                        <form method="GET" class="mb-3">
-                            <div class="input-group">
-                                <input type="text" name="search" class="form-control" placeholder="Search by name or email..." value="<?php echo htmlspecialchars($search); ?>">
-                                <button type="submit" class="btn btn-outline-primary">Search</button>
-                                <?php if (!empty($search)): ?>
-                                    <a href="?" class="btn btn-outline-secondary">Clear</a>
-                                <?php endif; ?>
-                            </div>
-                        </form>
-
                         <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
+                            <table class="table table-striped table-hover" id="staffTable">
+                                <thead class="bg-light">
                                     <tr>
-                                        <th>ID</th>
-                                        <th>Name</th>
+                                        <th>Staff ID</th>
+                                        <th>Username</th>
+                                        <th>First Name</th>
+                                        <th>Last Name</th>
                                         <th>Email</th>
                                         <th>Position</th>
-                                        <th>Created</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php if (empty($staff)): ?>
+                                    <?php foreach ($staff_members as $staff): ?>
                                         <tr>
-                                            <td colspan="6" class="text-center text-muted">No staff members found.</td>
+                                            <td><?php echo $staff['STAFF_ID']; ?></td>
+                                            <td><?php echo htmlspecialchars($staff['USER_NAME']); ?></td>
+                                            <td><?php echo htmlspecialchars($staff['STAFF_FIRST_NAME']); ?></td>
+                                            <td><?php echo htmlspecialchars($staff['STAFF_LAST_NAME']); ?></td>
+                                            <td><?php echo htmlspecialchars($staff['STAFF_EMAIL']); ?></td>
+                                            <td><?php echo htmlspecialchars($staff['STAFF_POSITION']); ?></td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-primary edit-staff-btn" 
+                                                        data-staff-id="<?php echo $staff['STAFF_ID']; ?>"
+                                                        data-first-name="<?php echo htmlspecialchars($staff['STAFF_FIRST_NAME']); ?>"
+                                                        data-last-name="<?php echo htmlspecialchars($staff['STAFF_LAST_NAME']); ?>"
+                                                        data-email="<?php echo htmlspecialchars($staff['STAFF_EMAIL']); ?>"
+                                                        data-position="<?php echo htmlspecialchars($staff['STAFF_POSITION']); ?>">
+                                                    <i class="fas fa-edit me-1"></i>Edit
+                                                </button>
+                                            </td>
                                         </tr>
-                                    <?php else: ?>
-                                        <?php foreach ($staff as $member): ?>
-                                            <tr>
-                                                <td><?php echo $member['STAFF_ID']; ?></td>
-                                                <td><?php echo htmlspecialchars($member['STAFF_FIRST_NAME'] . ' ' . $member['STAFF_LAST_NAME']); ?></td>
-                                                <td><?php echo htmlspecialchars($member['STAFF_EMAIL']); ?></td>
-                                                <td><?php echo htmlspecialchars($member['STAFF_POSITION']); ?></td>
-                                                <td><?php echo date('M j, Y', strtotime($member['STAFF_CREATED_AT'])); ?></td>
-                                                <td>
-                                                    <div class="btn-group btn-group-sm">
-                                                        <a href="?action=view&id=<?php echo $member['STAFF_ID']; ?>" class="btn btn-outline-primary">View</a>
-                                                        <a href="?action=edit&id=<?php echo $member['STAFF_ID']; ?>" class="btn btn-outline-secondary">Edit</a>
-                                                        <?php if (isset($_SESSION['user_is_superadmin'])): ?>
-                                                            <a href="?delete=<?php echo $member['STAFF_ID']; ?>"
-                                                               class="btn btn-outline-danger btn-delete"
-                                                               onclick="return confirm('Are you sure you want to delete this staff member?')">Delete</a>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php endif; ?>
+                                    <?php endforeach; ?>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-
-            <?php elseif ($action == 'add' || $action == 'edit'): ?>
-                <!-- Add/Edit Form -->
-                <?php
-                $staff_data = [];
-                if ($action == 'edit' && isset($_GET['id'])) {
-                    $stmt = $pdo->prepare("SELECT * FROM STAFF WHERE STAFF_ID = ?");
-                    $stmt->execute([$_GET['id']]);
-                    $staff_data = $stmt->fetch();
-                    if (!$staff_data) {
-                        echo '<div class="alert alert-danger">Staff member not found.</div>';
-                        include '../includes/tail.php';
-                        exit();
-                    }
-                }
-                ?>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0"><?php echo $action == 'add' ? 'Add New Staff' : 'Edit Staff'; ?></h5>
-                    </div>
-                    <div class="card-body">
-                        <form method="POST">
-                            <?php if ($action == 'edit'): ?>
-                                <input type="hidden" name="id" value="<?php echo $staff_data['STAFF_ID']; ?>">
-                            <?php endif; ?>
-
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="first_name" class="form-label">First Name <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="first_name" name="first_name"
-                                           value="<?php echo htmlspecialchars($staff_data['STAFF_FIRST_NAME'] ?? ''); ?>" required>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="last_name" class="form-label">Last Name <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="last_name" name="last_name"
-                                           value="<?php echo htmlspecialchars($staff_data['STAFF_LAST_NAME'] ?? ''); ?>" required>
-                                </div>
-                            </div>
-
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="email" class="form-label">Email <span class="text-danger">*</span></label>
-                                    <input type="email" class="form-control" id="email" name="email"
-                                           value="<?php echo htmlspecialchars($staff_data['STAFF_EMAIL'] ?? ''); ?>" required>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="position" class="form-label">Position</label>
-                                    <input type="text" class="form-control" id="position" name="position"
-                                           value="<?php echo htmlspecialchars($staff_data['STAFF_POSITION'] ?? ''); ?>">
-                                </div>
-                            </div>
-
-                            <div class="d-flex gap-2">
-                                <button type="submit" class="btn btn-primary"><?php echo $action == 'add' ? 'Add Staff' : 'Update Staff'; ?></button>
-                                <a href="?" class="btn btn-secondary">Cancel</a>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-            <?php elseif ($action == 'view' && isset($_GET['id'])): ?>
-                <!-- View Staff Details -->
-                <?php
-                $stmt = $pdo->prepare("SELECT * FROM STAFF WHERE STAFF_ID = ?");
-                $stmt->execute([$_GET['id']]);
-                $staff_data = $stmt->fetch();
-
-                if (!$staff_data) {
-                    echo '<div class="alert alert-danger">Staff member not found.</div>';
-                } else {
-                ?>
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">Staff Details</h5>
-                            <div class="btn-group">
-                                <a href="?action=edit&id=<?php echo $staff_data['STAFF_ID']; ?>" class="btn btn-outline-secondary">Edit</a>
-                                <a href="?" class="btn btn-outline-primary">Back to List</a>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <table class="table table-bordered">
-                                        <tr>
-                                            <th width="30%">Staff ID</th>
-                                            <td><?php echo $staff_data['STAFF_ID']; ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>First Name</th>
-                                            <td><?php echo htmlspecialchars($staff_data['STAFF_FIRST_NAME']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>Last Name</th>
-                                            <td><?php echo htmlspecialchars($staff_data['STAFF_LAST_NAME']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>Email</th>
-                                            <td><?php echo htmlspecialchars($staff_data['STAFF_EMAIL']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>Position</th>
-                                            <td><?php echo htmlspecialchars($staff_data['STAFF_POSITION']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>Created At</th>
-                                            <td><?php echo date('F j, Y g:i A', strtotime($staff_data['STAFF_CREATED_AT'])); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <th>Last Updated</th>
-                                            <td><?php echo date('F j, Y g:i A', strtotime($staff_data['STAFF_UPDATED_AT'])); ?></td>
-                                        </tr>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                <?php } ?>
-            <?php endif; ?>
-        </main>
+            </main>
+        </div>
     </div>
-</div>
 
-<?php include '../includes/tail.php'; ?>
+    <!-- Single Edit Staff Modal -->
+    <div class="modal fade" id="editStaffModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="POST" id="editStaffForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Staff Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" name="staff_id" id="modal_staff_id">
+                        <div class="mb-3">
+                            <label class="form-label">First Name</label>
+                            <input type="text" class="form-control" name="first_name" id="modal_first_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Last Name</label>
+                            <input type="text" class="form-control" name="last_name" id="modal_last_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" id="modal_email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Position</label>
+                            <input type="text" class="form-control" name="position" id="modal_position">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" name="update_staff" class="btn btn-primary">Update Staff</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const editButtons = document.querySelectorAll('.edit-staff-btn');
+            const editStaffModal = new bootstrap.Modal(document.getElementById('editStaffModal'));
+            
+            editButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const staffId = this.getAttribute('data-staff-id');
+                    const firstName = this.getAttribute('data-first-name');
+                    const lastName = this.getAttribute('data-last-name');
+                    const email = this.getAttribute('data-email');
+                    const position = this.getAttribute('data-position');
+                    
+                    // Populate modal fields
+                    document.getElementById('modal_staff_id').value = staffId;
+                    document.getElementById('modal_first_name').value = firstName;
+                    document.getElementById('modal_last_name').value = lastName;
+                    document.getElementById('modal_email').value = email;
+                    document.getElementById('modal_position').value = position;
+                    
+                    // Show modal
+                    editStaffModal.show();
+                });
+            });
+            
+            // Clear modal data when hidden to prevent stale data
+            document.getElementById('editStaffModal').addEventListener('hidden.bs.modal', function () {
+                document.getElementById('editStaffForm').reset();
+            });
+        });
+    </script>
+</body>
+</html>

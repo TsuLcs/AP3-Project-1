@@ -1,6 +1,7 @@
 <?php
 session_start();
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,7 +20,54 @@ session_start();
                 MediCare Clinic
             </a>
             <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="pages/login.php">Login</a>
+                <?php if (isset($_SESSION['user_id'])): ?>
+                    <!-- Logged In User -->
+                    <div class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <span class="badge bg-success me-2">
+                                <i class="fas fa-circle"></i> Online
+                            </span>
+                            Welcome, <?php echo htmlspecialchars($_SESSION['user_name']); ?>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li>
+                                <span class="dropdown-item-text small text-muted">
+                                    <i class="fas fa-user-circle me-1"></i>
+                                    <?php
+                                    if ($_SESSION['user_is_superadmin']) {
+                                        echo 'Super Admin';
+                                    } elseif ($_SESSION['staff_id']) {
+                                        echo 'Staff';
+                                    } elseif ($_SESSION['doc_id']) {
+                                        echo 'Doctor';
+                                    } elseif ($_SESSION['pat_id']) {
+                                        echo 'Patient';
+                                    }
+                                    ?>
+                                </span>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item" href="pages/dashboard.php">
+                                    <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                                </a>
+                            </li>
+                            <li><a class="dropdown-item" href="pages/logout.php">
+                                <i class="fas fa-sign-out-alt me-2"></i>Logout
+                            </a></li>
+                        </ul>
+                    </div>
+                <?php else: ?>
+                    <!-- Not Logged In -->
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-secondary me-3">
+                            <i class="fas fa-circle"></i> Offline
+                        </span>
+                        <a class="nav-link" href="pages/login.php">
+                            <i class="fas fa-sign-in-alt me-1"></i>Login
+                        </a>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </nav>
@@ -32,8 +80,44 @@ session_start();
                     <h1 class="display-4 fw-bold text-primary">Welcome to MediCare Clinic</h1>
                     <p class="lead mb-4">Your health is our priority. Book appointments with expert doctors and get the best medical care.</p>
                     <div class="d-flex gap-3">
-                        <a href="pages/login.php" class="btn btn-primary btn-lg">Book Appointment</a>
-                        <a href="#services" class="btn btn-outline-primary btn-lg">Our Services</a>
+                        <?php if (isset($_SESSION['user_id'])): ?>
+                            <!-- Logged In User Actions -->
+                            <a href="pages/dashboard.php" class="btn btn-primary btn-lg">Go to Dashboard</a>
+                            <a href="pages/logout.php" class="btn btn-outline-secondary btn-lg">Logout</a>
+                        <?php else: ?>
+                            <!-- Not Logged In Actions -->
+                            <a href="pages/login.php" class="btn btn-primary btn-lg">Book Appointment</a>
+                            <a href="#services" class="btn btn-outline-primary btn-lg">Our Services</a>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- User Status Indicator -->
+                    <div class="mt-4">
+                        <?php if (isset($_SESSION['user_id'])): ?>
+                            <div class="alert alert-success d-inline-flex align-items-center" role="alert">
+                                <i class="fas fa-check-circle me-2"></i>
+                                You are logged in as 
+                                <strong class="mx-1">
+                                    <?php echo htmlspecialchars($_SESSION['user_name']); ?>
+                                </strong>
+                                (<?php
+                                if ($_SESSION['user_is_superadmin']) {
+                                    echo 'Super Administrator';
+                                } elseif ($_SESSION['staff_id']) {
+                                    echo 'Staff Member';
+                                } elseif ($_SESSION['doc_id']) {
+                                    echo 'Doctor';
+                                } elseif ($_SESSION['pat_id']) {
+                                    echo 'Patient';
+                                }
+                                ?>)
+                            </div>
+                        <?php else: ?>
+                            <div class="alert alert-warning d-inline-flex align-items-center" role="alert">
+                                <i class="fas fa-exclamation-circle me-2"></i>
+                                You are not logged in. <a href="pages/login.php" class="alert-link mx-1">Login</a> to access your account.
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="col-lg-6">
@@ -126,6 +210,8 @@ session_start();
         </div>
     </footer>
 
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -26,17 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $update_stmt = $pdo->prepare("UPDATE USER SET USER_LAST_LOGIN = NOW() WHERE USER_ID = ?");
         $update_stmt->execute([$user['USER_ID']]);
         
-        // Redirect based on user role
-        if ($user['USER_IS_SUPERADMIN']) {
-            header("Location: superadmin_dashboard.php");
-        } elseif ($user['STAFF_ID']) {
-            header("Location: staff_dashboard.php");
-        } elseif ($user['DOC_ID']) {
-            header("Location: doctor_today.php");
-        } elseif ($user['PAT_ID']) {
-            header("Location: patient_appointments.php");
-        }
-        exit();
+        header("Location: dashboard.php");
     } else {
         $error = "Invalid username or password";
     }

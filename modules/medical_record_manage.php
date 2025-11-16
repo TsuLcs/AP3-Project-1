@@ -1,7 +1,7 @@
 <?php
 $page_title = "Medical Record Management";
 include '../includes/head.php';
-require_once '../includes/data/dbconfig.php';
+require_once '../data/dbconfig.php';
 
 // Check access - Super Admin, Staff, and Doctors can access
 if (!isset($_SESSION['user_is_superadmin']) && !isset($_SESSION['staff_id']) && !isset($_SESSION['doc_id'])) {
