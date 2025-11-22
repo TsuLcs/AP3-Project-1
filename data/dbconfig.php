@@ -1,12 +1,15 @@
 <?php
-$db_host = "localhost";
-$db_name = "approject1";
-$db_user = "root";
-$db_password = "";
+session_start();
+
+$host = "localhost";
+$dbname = "approject1";
+$username = "root";
+$password = "";
 
 try {
-    $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);  // optional for debugging
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
     die("Connection failed: " . $e->getMessage());
 }
+?>
