@@ -1,5 +1,6 @@
 <?php
 $page_title = "MediCare Clinic - Quality Healthcare Services";
+session_start();
 ?>
 <!DOCTYPE html>
 <html lang="en">

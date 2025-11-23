@@ -1,14 +1,15 @@
 <?php
-// Only start session if not already started
+// Start session if not already started
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
+
 require_once '../data/dbconfig.php';
 
 $error = '';
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $username = $_POST['username'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $username = trim($_POST['username']);
     $password = $_POST['password'];
 
     try {
@@ -17,21 +18,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($user && password_verify($password, $user['USER_PASSWORD'])) {
+            // Set basic session
             $_SESSION['user_id'] = $user['USER_ID'];
             $_SESSION['user_name'] = $user['USER_NAME'];
             $_SESSION['user_is_superadmin'] = (bool)$user['USER_IS_SUPERADMIN'];
 
-            // Set role-specific sessions
-            if ($user['PAT_ID']) {
+            // Set role-specific session and redirect
+            if (!empty($user['PAT_ID'])) {
                 $_SESSION['patient_id'] = $user['PAT_ID'];
                 header("Location: ../modules/patient_dashboard.php");
-            } elseif ($user['STAFF_ID']) {
+            } elseif (!empty($user['STAFF_ID'])) {
                 $_SESSION['staff_id'] = $user['STAFF_ID'];
                 header("Location: ../modules/staff_dashboard.php");
-            } elseif ($user['DOC_ID']) {
+            } elseif (!empty($user['DOC_ID'])) {
                 $_SESSION['doctor_id'] = $user['DOC_ID'];
                 header("Location: ../modules/doctor_dashboard.php");
-            } elseif ($user['USER_IS_SUPERADMIN']) {
+            } elseif (!empty($user['USER_IS_SUPERADMIN'])) {
                 header("Location: ../modules/dashboard.php");
             } else {
                 $error = "User has no assigned role.";
@@ -48,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -59,13 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             min-height: 100vh;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
+
         .login-card {
             background: white;
             border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
+
 <body>
     <div class="login-container d-flex align-items-center">
         <div class="container">
@@ -82,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
 
-                        <form method="POST">
+                        <form method="POST" action="">
                             <div class="mb-3">
                                 <label class="form-label">Username</label>
                                 <div class="input-group">
@@ -100,6 +105,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <button type="submit" class="btn btn-primary w-100 py-2">
                                 <i class="fas fa-sign-in-alt me-2"></i>Sign In
                             </button>
+                            <div class="text-center mt-3">
+                                <a href="../modules/register_patient.php" class="btn btn-outline-success w-100">
+                                    <i class="fas fa-user-plus me-2"></i>Register as Patient
+                                </a>
+                            </div>
                         </form>
 
                         <div class="text-center mt-3">
@@ -116,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
         </div>
     </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
+
 </html>
