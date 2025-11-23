@@ -2,6 +2,7 @@
 $page_title = "User Management";
 include '../includes/head.php';
 require_once '../data/dbconfig.php';
+require_once '../includes/auth.php';
 
 // Check access - Only Super Admin can access
 if (!isset($_SESSION['user_is_superadmin']) || !$_SESSION['user_is_superadmin']) {
@@ -12,175 +13,248 @@ if (!isset($_SESSION['user_is_superadmin']) || !$_SESSION['user_is_superadmin'])
 $action = $_GET['action'] ?? 'list';
 $message = '';
 
+// Function to generate unique contact number
+function generateUniqueContactNumber($pdo, $type) {
+    $base_number = '0900';
+    $max_attempts = 100;
+
+    for ($i = 0; $i < $max_attempts; $i++) {
+        $random_suffix = str_pad(mt_rand(0, 999999), 6, '0', STR_PAD_LEFT);
+        $contact_number = $base_number . $random_suffix;
+
+        // Check if contact number exists in the appropriate table
+        if ($type === 'doctor') {
+            $check_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM doctor WHERE DOC_CONTACT_NUM = ?");
+        } elseif ($type === 'patient') {
+            $check_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM patient WHERE PAT_CONTACT_NUM = ?");
+        } else {
+            // For staff, contact number doesn't need to be unique based on your schema
+            return $contact_number;
+        }
+
+        $check_stmt->execute([$contact_number]);
+        $result = $check_stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($result['count'] == 0) {
+            return $contact_number;
+        }
+    }
+
+    // If all attempts fail, generate based on timestamp
+    return $base_number . str_pad(time() % 1000000, 6, '0', STR_PAD_LEFT);
+}
+
+// Function to generate unique email
+function generateUniqueEmail($pdo, $username, $role_type) {
+    $max_attempts = 100;
+
+    // Different email patterns for different roles
+    $email_patterns = [
+        'staff' => [
+            $username . '.staff@medicare.com',
+            $username . '.staff' . time() . '@medicare.com',
+            'staff.' . $username . '.' . mt_rand(1000, 9999) . '@medicare.com'
+        ],
+        'doctor' => [
+            $username . '.doctor@medicare.com',
+            'dr.' . $username . '@medicare.com',
+            $username . '.dr' . mt_rand(1000, 9999) . '@medicare.com'
+        ],
+        'patient' => [
+            $username . '.patient@medicare.com',
+            $username . '.pat@medicare.com',
+            'patient.' . $username . mt_rand(1000, 9999) . '@medicare.com'
+        ]
+    ];
+
+    // Try each pattern until we find a unique one
+    foreach ($email_patterns[$role_type] as $email_pattern) {
+        if ($role_type === 'staff') {
+            $check_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM staff WHERE STAFF_EMAIL = ?");
+        } elseif ($role_type === 'doctor') {
+            $check_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM doctor WHERE DOC_EMAIL = ?");
+        } elseif ($role_type === 'patient') {
+            $check_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM patient WHERE PAT_EMAIL = ?");
+        }
+
+        $check_stmt->execute([$email_pattern]);
+        $result = $check_stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($result['count'] == 0) {
+            return $email_pattern;
+        }
+    }
+
+    // If all patterns fail, generate completely random email
+    return $username . '.' . $role_type . '.' . uniqid() . '@medicare.com';
+}
+
 // Handle role assignment
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_role'])) {
     $user_id = $_POST['user_id'];
     $role_type = $_POST['role_type'];
-    
+
     try {
         $pdo->beginTransaction();
-        
-        // First, clear all role references in USER table before deleting role records
-        $clear_roles = $pdo->prepare("UPDATE USER SET PAT_ID = NULL, STAFF_ID = NULL, DOC_ID = NULL, USER_IS_SUPERADMIN = FALSE WHERE USER_ID = ?");
+
+        // First, clear all role references in USER table
+        $clear_roles = $pdo->prepare("UPDATE user SET PAT_ID = NULL, STAFF_ID = NULL, DOC_ID = NULL, USER_IS_SUPERADMIN = FALSE WHERE USER_ID = ?");
         $clear_roles->execute([$user_id]);
-        
-        // Now safely delete any existing role records (foreign key constraints are cleared)
-        $delete_staff = $pdo->prepare("DELETE FROM STAFF WHERE STAFF_ID = ?");
-        $delete_staff->execute([$user_id]);
-        
-        $delete_doctor = $pdo->prepare("DELETE FROM DOCTOR WHERE DOC_ID = ?");
-        $delete_doctor->execute([$user_id]);
-        
-        // For patient deletion, we need to handle appointments first
-        $delete_patient = $pdo->prepare("DELETE FROM PATIENT WHERE PAT_ID = ?");
-        $delete_patient->execute([$user_id]);
-        
+
+        // Get user details for creating role records
+        $user_stmt = $pdo->prepare("SELECT USER_NAME FROM user WHERE USER_ID = ?");
+        $user_stmt->execute([$user_id]);
+        $user_data = $user_stmt->fetch();
+        $username = $user_data['USER_NAME'];
+
         // Now assign the new role
         if ($role_type === 'staff') {
-            // Get user details to populate staff record
-            $user_stmt = $pdo->prepare("SELECT USER_NAME FROM USER WHERE USER_ID = ?");
-            $user_stmt->execute([$user_id]);
-            $user_data = $user_stmt->fetch();
-            
-            // Create staff record
-            $staff_stmt = $pdo->prepare("INSERT INTO STAFF (STAFF_ID, STAFF_FIRST_NAME, STAFF_LAST_NAME, STAFF_EMAIL, STAFF_POSITION) VALUES (?, ?, ?, ?, ?)");
+            // Generate unique email for staff
+            $staff_email = generateUniqueEmail($pdo, $username, 'staff');
+
+            // Create staff record (let it auto-increment)
+            $staff_stmt = $pdo->prepare("INSERT INTO staff (STAFF_FIRST_NAME, STAFF_LAST_NAME, STAFF_EMAIL, STAFF_POSITION) VALUES (?, ?, ?, ?)");
             $staff_stmt->execute([
-                $user_id,
                 'Staff', // Default first name
                 'Member', // Default last name
-                $user_data['USER_NAME'] . '@medicare.com', // Default email
-                'Staff Member' // Default position
+                $staff_email,
+                'Staff Member'
             ]);
-            
-            // Update user role - set STAFF_ID
-            $update_stmt = $pdo->prepare("UPDATE USER SET STAFF_ID = ? WHERE USER_ID = ?");
-            $update_stmt->execute([$user_id, $user_id]);
-            
+
+            $staff_id = $pdo->lastInsertId();
+
+            // Update user with STAFF_ID
+            $update_stmt = $pdo->prepare("UPDATE user SET STAFF_ID = ? WHERE USER_ID = ?");
+            $update_stmt->execute([$staff_id, $user_id]);
+
         } elseif ($role_type === 'doctor') {
-            // Get user details to populate doctor record
-            $user_stmt = $pdo->prepare("SELECT USER_NAME FROM USER WHERE USER_ID = ?");
-            $user_stmt->execute([$user_id]);
-            $user_data = $user_stmt->fetch();
-            
-            // Create doctor record
-            $doctor_stmt = $pdo->prepare("INSERT INTO DOCTOR (DOC_ID, DOC_FIRST_NAME, DOC_LAST_NAME, DOC_CONTACT_NUM, DOC_EMAIL) VALUES (?, ?, ?, ?, ?)");
+            // Generate unique contact number and email
+            $contact_number = generateUniqueContactNumber($pdo, 'doctor');
+            $doctor_email = generateUniqueEmail($pdo, $username, 'doctor');
+
+            // Create doctor record (let it auto-increment)
+            $doctor_stmt = $pdo->prepare("INSERT INTO doctor (DOC_FIRST_NAME, DOC_LAST_NAME, DOC_CONTACT_NUM, DOC_EMAIL) VALUES (?, ?, ?, ?)");
             $doctor_stmt->execute([
-                $user_id,
-                'Doctor', // Default first name
-                'Name', // Default last name
-                '000-000-0000', // Default contact
-                $user_data['USER_NAME'] . '@medicare.com' // Default email
+                'Doctor',
+                'Name',
+                $contact_number,
+                $doctor_email
             ]);
-            
-            // Update user role - set DOC_ID
-            $update_stmt = $pdo->prepare("UPDATE USER SET DOC_ID = ? WHERE USER_ID = ?");
-            $update_stmt->execute([$user_id, $user_id]);
-            
+
+            $doc_id = $pdo->lastInsertId();
+
+            // Update user with DOC_ID
+            $update_stmt = $pdo->prepare("UPDATE user SET DOC_ID = ? WHERE USER_ID = ?");
+            $update_stmt->execute([$doc_id, $user_id]);
+
         } elseif ($role_type === 'patient') {
-            // Get user details to populate patient record
-            $user_stmt = $pdo->prepare("SELECT USER_NAME FROM USER WHERE USER_ID = ?");
-            $user_stmt->execute([$user_id]);
-            $user_data = $user_stmt->fetch();
-            
-            // Create patient record
-            $patient_stmt = $pdo->prepare("INSERT INTO PATIENT (PAT_ID, PAT_FIRST_NAME, PAT_LAST_NAME, PAT_EMAIL, PAT_CONTACT_NUM) VALUES (?, ?, ?, ?, ?)");
+            // Generate unique contact number and email
+            $contact_number = generateUniqueContactNumber($pdo, 'patient');
+            $patient_email = generateUniqueEmail($pdo, $username, 'patient');
+
+            // Create patient record (let it auto-increment)
+            $patient_stmt = $pdo->prepare("INSERT INTO patient (PAT_FIRST_NAME, PAT_LAST_NAME, PAT_EMAIL, PAT_CONTACT_NUM, PAT_GENDER, PAT_DOB) VALUES (?, ?, ?, ?, ?, ?)");
             $patient_stmt->execute([
-                $user_id,
-                'Patient', // Default first name
-                'User', // Default last name
-                $user_data['USER_NAME'] . '@medicare.com', // Default email
-                '000-000-0000' // Default contact
+                'Patient',
+                'User',
+                $patient_email,
+                $contact_number,
+                'Other', // Default gender
+                date('Y-m-d') // Default DOB (today)
             ]);
-            
-            // Update user role - set PAT_ID
-            $update_stmt = $pdo->prepare("UPDATE USER SET PAT_ID = ? WHERE USER_ID = ?");
-            $update_stmt->execute([$user_id, $user_id]);
+
+            $pat_id = $pdo->lastInsertId();
+
+            // Update user with PAT_ID
+            $update_stmt = $pdo->prepare("UPDATE user SET PAT_ID = ? WHERE USER_ID = ?");
+            $update_stmt->execute([$pat_id, $user_id]);
         }
-        
+
         $pdo->commit();
-        $success_message = "Role assigned successfully!";
-        
-        // Refresh to show updated data
+        $_SESSION['success'] = "Role assigned successfully!";
         header("Location: user_manage.php");
         exit();
-        
+
     } catch (PDOException $e) {
         $pdo->rollBack();
-        $error_message = "Error assigning role: " . $e->getMessage();
+        $_SESSION['error'] = "Error assigning role: " . $e->getMessage();
     }
 }
 
-// Handle role removal (demote to basic user - NO ROLE)
+// Handle role removal (demote to basic user)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_role'])) {
     $user_id = $_POST['user_id'];
-    
+
     try {
         $pdo->beginTransaction();
-        
-        // First, check if the user has a patient role and has appointments
-        $check_patient = $pdo->prepare("SELECT PAT_ID FROM USER WHERE USER_ID = ? AND PAT_ID IS NOT NULL");
-        $check_patient->execute([$user_id]);
-        $has_patient_role = $check_patient->fetch();
-        
-        if ($has_patient_role) {
-            // Check if patient has appointments
+
+        // Get current user role data
+        $user_stmt = $pdo->prepare("SELECT PAT_ID, STAFF_ID, DOC_ID FROM user WHERE USER_ID = ?");
+        $user_stmt->execute([$user_id]);
+        $user_data = $user_stmt->fetch();
+
+        // Check if user has patient role and has appointments
+        if ($user_data['PAT_ID']) {
             $check_appointments = $pdo->prepare("SELECT COUNT(*) as appointment_count FROM appointment WHERE PAT_ID = ?");
-            $check_appointments->execute([$user_id]);
+            $check_appointments->execute([$user_data['PAT_ID']]);
             $appointment_count = $check_appointments->fetch(PDO::FETCH_ASSOC)['appointment_count'];
-            
+
             if ($appointment_count > 0) {
                 throw new Exception("Cannot remove patient role: This patient has {$appointment_count} appointment(s) in the system. Please delete or reassign the appointments first.");
             }
         }
-        
-        // First, clear all role references in USER table
-        $clear_roles = $pdo->prepare("UPDATE USER SET PAT_ID = NULL, STAFF_ID = NULL, DOC_ID = NULL, USER_IS_SUPERADMIN = FALSE WHERE USER_ID = ?");
+
+        // FIRST: Clear all role references in USER table (this removes foreign key constraints)
+        $clear_roles = $pdo->prepare("UPDATE user SET PAT_ID = NULL, STAFF_ID = NULL, DOC_ID = NULL, USER_IS_SUPERADMIN = FALSE WHERE USER_ID = ?");
         $clear_roles->execute([$user_id]);
-        
-        // Now safely delete role records (foreign key constraints are cleared)
-        $delete_staff = $pdo->prepare("DELETE FROM STAFF WHERE STAFF_ID = ?");
-        $delete_staff->execute([$user_id]);
-        
-        $delete_doctor = $pdo->prepare("DELETE FROM DOCTOR WHERE DOC_ID = ?");
-        $delete_doctor->execute([$user_id]);
-        
-        // Only delete patient if no appointments exist (we already checked above)
-        $delete_patient = $pdo->prepare("DELETE FROM PATIENT WHERE PAT_ID = ?");
-        $delete_patient->execute([$user_id]);
-        
+
+        // SECOND: Now safely delete role records (foreign key constraints are cleared)
+        if ($user_data['PAT_ID']) {
+            $delete_patient = $pdo->prepare("DELETE FROM patient WHERE PAT_ID = ?");
+            $delete_patient->execute([$user_data['PAT_ID']]);
+        }
+
+        if ($user_data['STAFF_ID']) {
+            $delete_staff = $pdo->prepare("DELETE FROM staff WHERE STAFF_ID = ?");
+            $delete_staff->execute([$user_data['STAFF_ID']]);
+        }
+
+        if ($user_data['DOC_ID']) {
+            $delete_doctor = $pdo->prepare("DELETE FROM doctor WHERE DOC_ID = ?");
+            $delete_doctor->execute([$user_data['DOC_ID']]);
+        }
+
         $pdo->commit();
-        $success_message = "User role removed successfully! User is now a basic user.";
-        
-        // Refresh to show updated data
+        $_SESSION['success'] = "User role removed successfully! User is now a basic user.";
         header("Location: user_manage.php");
         exit();
-        
+
     } catch (PDOException $e) {
         $pdo->rollBack();
-        $error_message = "Database error removing role: " . $e->getMessage();
+        $_SESSION['error'] = "Database error removing role: " . $e->getMessage();
     } catch (Exception $e) {
         $pdo->rollBack();
-        $error_message = $e->getMessage();
+        $_SESSION['error'] = $e->getMessage();
     }
 }
 
 // Get all users with their roles
 $users = $pdo->query("
     SELECT u.USER_ID, u.USER_NAME, u.USER_IS_SUPERADMIN, u.PAT_ID, u.STAFF_ID, u.DOC_ID,
-           p.PAT_FIRST_NAME, p.PAT_LAST_NAME, p.PAT_EMAIL, p.PAT_CONTACT_NUM,
+           p.PAT_FIRST_NAME, p.PAT_LAST_NAME, p.PAT_EMAIL, p.PAT_CONTACT_NUM, p.PAT_GENDER, p.PAT_DOB,
            s.STAFF_FIRST_NAME, s.STAFF_LAST_NAME, s.STAFF_POSITION, s.STAFF_EMAIL,
-           d.DOC_FIRST_NAME, d.DOC_LAST_NAME, d.DOC_EMAIL,
-           CASE 
+           d.DOC_FIRST_NAME, d.DOC_LAST_NAME, d.DOC_EMAIL, d.DOC_CONTACT_NUM,
+           CASE
                WHEN u.USER_IS_SUPERADMIN = 1 THEN 'Super Admin'
                WHEN u.STAFF_ID IS NOT NULL THEN 'Staff'
                WHEN u.DOC_ID IS NOT NULL THEN 'Doctor'
                WHEN u.PAT_ID IS NOT NULL THEN 'Patient'
                ELSE 'Basic User'
            END as user_role
-    FROM USER u
-    LEFT JOIN PATIENT p ON u.PAT_ID = p.PAT_ID
-    LEFT JOIN STAFF s ON u.STAFF_ID = s.STAFF_ID
-    LEFT JOIN DOCTOR d ON u.DOC_ID = d.DOC_ID
+    FROM user u
+    LEFT JOIN patient p ON u.PAT_ID = p.PAT_ID
+    LEFT JOIN staff s ON u.STAFF_ID = s.STAFF_ID
+    LEFT JOIN doctor d ON u.DOC_ID = d.DOC_ID
     ORDER BY u.USER_ID
 ")->fetchAll();
 ?>
@@ -200,7 +274,7 @@ $users = $pdo->query("
     <div class="container-fluid">
         <div class="row">
             <?php include '../includes/sidebar.php'; ?>
-            
+
             <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
                     <h1 class="h2">
@@ -208,12 +282,12 @@ $users = $pdo->query("
                     </h1>
                 </div>
 
-                <?php if (isset($success_message)): ?>
-                    <div class="alert alert-success"><?php echo $success_message; ?></div>
+                <?php if (isset($_SESSION['success'])): ?>
+                    <div class="alert alert-success"><?php echo $_SESSION['success']; unset($_SESSION['success']); ?></div>
                 <?php endif; ?>
-                
-                <?php if (isset($error_message)): ?>
-                    <div class="alert alert-danger"><?php echo $error_message; ?></div>
+
+                <?php if (isset($_SESSION['error'])): ?>
+                    <div class="alert alert-danger"><?php echo $_SESSION['error']; unset($_SESSION['error']); ?></div>
                 <?php endif; ?>
 
                 <div class="card shadow">
@@ -262,22 +336,25 @@ $users = $pdo->query("
                                                 if ($user['user_role'] === 'Patient' && $user['PAT_FIRST_NAME']) {
                                                     echo htmlspecialchars($user['PAT_FIRST_NAME'] . ' ' . $user['PAT_LAST_NAME']);
                                                     echo '<br><small class="text-muted">' . htmlspecialchars($user['PAT_EMAIL']) . '</small>';
-                                                    
+                                                    echo '<br><small class="text-muted">' . htmlspecialchars($user['PAT_CONTACT_NUM']) . '</small>';
+
                                                     // Show appointment count for patients
                                                     $appt_count_stmt = $pdo->prepare("SELECT COUNT(*) as appt_count FROM appointment WHERE PAT_ID = ?");
-                                                    $appt_count_stmt->execute([$user['USER_ID']]);
+                                                    $appt_count_stmt->execute([$user['PAT_ID']]);
                                                     $appt_count = $appt_count_stmt->fetch(PDO::FETCH_ASSOC)['appt_count'];
                                                     if ($appt_count > 0) {
                                                         echo '<br><small class="text-warning"><i class="fas fa-calendar-check me-1"></i>' . $appt_count . ' appointment(s)</small>';
                                                     }
                                                 } elseif ($user['user_role'] === 'Staff' && $user['STAFF_FIRST_NAME']) {
                                                     echo htmlspecialchars($user['STAFF_FIRST_NAME'] . ' ' . $user['STAFF_LAST_NAME']);
+                                                    echo '<br><small class="text-muted">' . htmlspecialchars($user['STAFF_EMAIL']) . '</small>';
                                                     if ($user['STAFF_POSITION']) {
                                                         echo '<br><small class="text-muted">' . htmlspecialchars($user['STAFF_POSITION']) . '</small>';
                                                     }
                                                 } elseif ($user['user_role'] === 'Doctor' && $user['DOC_FIRST_NAME']) {
                                                     echo 'Dr. ' . htmlspecialchars($user['DOC_FIRST_NAME'] . ' ' . $user['DOC_LAST_NAME']);
                                                     echo '<br><small class="text-muted">' . htmlspecialchars($user['DOC_EMAIL']) . '</small>';
+                                                    echo '<br><small class="text-muted">' . htmlspecialchars($user['DOC_CONTACT_NUM']) . '</small>';
                                                 } else {
                                                     echo '<span class="text-muted">No role details</span>';
                                                 }
@@ -302,7 +379,7 @@ $users = $pdo->query("
                                                                     </form>
                                                                 </li>
                                                             <?php endif; ?>
-                                                            
+
                                                             <!-- Assign as Staff -->
                                                             <?php if ($user['user_role'] !== 'Staff'): ?>
                                                                 <li>
@@ -315,7 +392,7 @@ $users = $pdo->query("
                                                                     </form>
                                                                 </li>
                                                             <?php endif; ?>
-                                                            
+
                                                             <!-- Assign as Doctor -->
                                                             <?php if ($user['user_role'] !== 'Doctor'): ?>
                                                                 <li>
@@ -328,14 +405,14 @@ $users = $pdo->query("
                                                                     </form>
                                                                 </li>
                                                             <?php endif; ?>
-                                                            
+
                                                             <!-- Remove All Roles -->
                                                             <?php if ($user['user_role'] !== 'Basic User'): ?>
                                                                 <li><hr class="dropdown-divider"></li>
                                                                 <li>
                                                                     <form method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to remove all roles from this user? They will become a basic user and all role-specific data will be deleted.');">
                                                                         <input type="hidden" name="user_id" value="<?php echo $user['USER_ID']; ?>">
-                                                                        <button type="submit" name="remove_role" class="dropdown-item text-secondary">
+                                                                        <button type="submit" name="remove_role" class="dropdown-item text-danger">
                                                                             <i class="fas fa-user-times me-2"></i>Remove All Roles
                                                                         </button>
                                                                     </form>
@@ -371,7 +448,7 @@ $users = $pdo->query("
                                     </div>
                                     <div>
                                         <h6 class="mb-0">Assign as Patient</h6>
-                                        <small class="text-muted">Creates patient record and assigns role</small>
+                                        <small class="text-muted">Creates patient record with unique contact/email</small>
                                     </div>
                                 </div>
                             </div>
@@ -382,7 +459,7 @@ $users = $pdo->query("
                                     </div>
                                     <div>
                                         <h6 class="mb-0">Assign as Staff</h6>
-                                        <small class="text-muted">Creates staff record and assigns role</small>
+                                        <small class="text-muted">Creates staff record with unique email</small>
                                     </div>
                                 </div>
                             </div>
@@ -393,13 +470,13 @@ $users = $pdo->query("
                                     </div>
                                     <div>
                                         <h6 class="mb-0">Assign as Doctor</h6>
-                                        <small class="text-muted">Creates doctor record and assigns role</small>
+                                        <small class="text-muted">Creates doctor record with unique contact/email</small>
                                     </div>
                                 </div>
                             </div>
                             <div class="col-md-3 mb-3">
                                 <div class="d-flex align-items-center mb-2">
-                                    <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                                    <div class="bg-danger text-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
                                         <i class="fas fa-user-times"></i>
                                     </div>
                                     <div>
@@ -409,20 +486,19 @@ $users = $pdo->query("
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="alert alert-info mt-3">
                             <strong><i class="fas fa-lightbulb me-2"></i>How Role Assignment Works:</strong><br>
-                            - <strong>Patient</strong>: Creates record in PATIENT table with default details<br>
-                            - <strong>Staff</strong>: Creates record in STAFF table with default details<br>
-                            - <strong>Doctor</strong>: Creates record in DOCTOR table with default details<br>
+                            - <strong>Patient</strong>: Creates record in PATIENT table with unique contact number and email<br>
+                            - <strong>Staff</strong>: Creates record in STAFF table with unique email<br>
+                            - <strong>Doctor</strong>: Creates record in DOCTOR table with unique contact number and email<br>
                             - <strong>Remove Roles</strong>: User becomes basic user and all role-specific data is deleted<br>
                             - <strong>Important</strong>: Cannot remove patient role if the patient has existing appointments
                         </div>
-                        
-                        <div class="alert alert-warning">
-                            <strong><i class="fas fa-exclamation-triangle me-2"></i>Important Note:</strong><br>
-                            If you encounter errors when removing patient roles, it means the patient has existing appointments in the system. 
-                            You must first delete or reassign those appointments before removing the patient role.
+
+                        <div class="alert alert-success">
+                            <strong><i class="fas fa-check-circle me-2"></i>Unique Email Generation:</strong><br>
+                            The system automatically generates unique emails for each role to avoid database conflicts. Each user gets a distinct email address based on their username and role type.
                         </div>
                     </div>
                 </div>
