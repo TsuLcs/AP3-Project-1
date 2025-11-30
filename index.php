@@ -1,5 +1,5 @@
 <?php
-$page_title = "MediCare Clinic - Quality Healthcare Services";
+$page_title = "MedCare Clinic - Quality Healthcare Services";
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -105,8 +105,8 @@ $page_title = "MediCare Clinic - Quality Healthcare Services";
     <!-- Footer -->
     <footer class="bg-dark text-light py-4">
         <div class="container text-center">
-            <p>&copy; 2025 MediCare Clinic. All rights reserved.</p>
-            <p>Contact: info@medicare.com | Phone: (032) 123-4567</p>
+            <p>&copy; 2025 MedCare Clinic. All rights reserved.</p>
+            <p>Contact: info@medcare.com | Phone: (032) 123-4567</p>
         </div>
     </footer>
 

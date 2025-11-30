@@ -1,5 +1,5 @@
 <?php
 if (!isset($page_title)) {
-    $page_title = "MediCare Clinic";
+    $page_title = "MedCare Clinic";
 }
 ?>
