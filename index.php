@@ -30,7 +30,7 @@ $page_title = "MediCare Clinic - Quality Healthcare Services";
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="#">
-                <i class="fas fa-hospital-user me-2"></i>MediCare Clinic
+                <i class="fas fa-hospital-user me-2"></i>MedCare Clinic
             </a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="pages/login.php">
